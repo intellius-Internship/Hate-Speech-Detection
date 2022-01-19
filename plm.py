@@ -43,27 +43,27 @@ class LightningPLM(LightningModule):
                             help='warmup ratio')
         return parser
 
-    def forward(self, input_ids, attention_mask=None, token_type_ids=None):
+    def forward(self, input_ids, attention_mask=None, token_type_ids=None, labels=None):
         if token_type_ids is None:
             token_type_ids = torch.zeros(input_ids.size(), dtype=torch.int).type_as(input_ids)
         output = self.model(input_ids=input_ids, attention_mask=attention_mask, \
-            token_type_ids=token_type_ids, return_dict=True)
-        return output.logits
+            token_type_ids=token_type_ids, labels=labels, return_dict=True)
+        return output
 
     def training_step(self, batch, batch_idx):
         input_ids, attention_mask, label = batch
-        logits = self(input_ids=input_ids, attention_mask=attention_mask)
-        loss = self.loss_function(logits.view(-1, self.hparams.num_labels), label.view(-1))
+        output = self(input_ids=input_ids, attention_mask=attention_mask, labels=label)
+        # loss = self.loss_function(logits.view(-1, self.hparams.num_labels), label.view(-1))
         
-        self.log('train_loss', loss, prog_bar=True)
-        return loss
+        self.log('train_loss', output.loss, prog_bar=True)
+        return output.loss
 
     def validation_step(self, batch, batch_idx):
         input_ids, attention_mask, label = batch
-        logits = self(input_ids=input_ids, attention_mask=attention_mask)
-        loss = self.loss_function(logits.view(-1, self.hparams.num_labels), label.view(-1))
-        self.log('val_loss', loss, prog_bar=True, on_step=False, on_epoch=True)
-        return loss
+        output = self(input_ids=input_ids, attention_mask=attention_mask, labels=label)
+        # loss = self.loss_function(logits.view(-1, self.hparams.num_labels), label.view(-1))
+        self.log('val_loss', output.loss, prog_bar=True, on_step=False, on_epoch=True)
+        return output.loss
 
     def validation_epoch_end(self, outputs):
         avg_losses = []

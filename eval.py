@@ -17,7 +17,7 @@ def base_setting(args):
 def tokenize(tokenizer, text, max_len):
     q_toked = tokenizer.tokenize(tokenizer.cls_token + text + tokenizer.sep_token)
     if len(q_toked) > max_len:
-        q_toked = q_toked[:max_len-1] + q_toked[-1]
+        q_toked = q_toked[:max_len-1] + [q_toked[-1]]
 
     token_ids = tokenizer.convert_tokens_to_ids(q_toked)
     attention_mask = [1] * len(token_ids)
@@ -57,24 +57,26 @@ def evaluation(args, **kwargs):
     with torch.no_grad():
         for row in test_data.iterrows():
 
-            utterance = args.delimiter.join(row[1]['proc_text'])
+            utterance = row[1]['proc_text']
             label = int(row[1]['label'])
             
             input_ids, attention_mask = tokenize(tokenizer, text=utterance, max_len=args.max_len)
 
             input_ids = torch.LongTensor(input_ids).unsqueeze(0).to(device=device)
-            attention_mask = torch.FloatTensor(attention_mask).unsqueeze(0).to(device=device)
+            attention_mask = torch.LongTensor(attention_mask).unsqueeze(0).to(device=device)
 
-            logits = model(input_ids=input_ids, attention_mask=attention_mask).detach().cpu()
+            output = model(input_ids=input_ids, attention_mask=attention_mask)
+            logits = output.logits.detach().cpu()
+
             predictions = torch.argmax(logits, dim=-1).detach().cpu().numpy().tolist()
-            print(predictions)
+            print(predictions[0], utterance)
             pred_list.append(predictions[0]) 
 
             if predictions[0] == label:
                 count += 1
 
         test_data['pred'] = pred_list
-        test_data.to_csv(pjoin(args.save_dir, f'{args.model_name}.csv'), sep='\t', index=False)
+        test_data.to_csv(pjoin(args.save_dir, f'{args.model_name}.csv'), index=False)
         print(f"Accuracy: {count/len(test_data)}")
             
 
