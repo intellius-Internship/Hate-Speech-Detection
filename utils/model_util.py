@@ -1,10 +1,10 @@
+from tokenization import KoBertTokenizer
 from transformers import (ElectraForSequenceClassification, ElectraTokenizer, ElectraConfig,
                         BertForSequenceClassification, BertConfig,
                         AutoModelForSequenceClassification, AutoTokenizer, AutoConfig)
 
-from tokenization import KoBertTokenizer
 
-def load_model(model_type, num_labels, labels=None, cache_dir='./cache'):
+def load_model(model_type, num_labels=0, labels=None, cache_dir='./cache'):
     if labels is None:
         labels = list(range(num_labels))
 
@@ -37,6 +37,21 @@ def load_model(model_type, num_labels, labels=None, cache_dir='./cache'):
         tokenizer = ElectraTokenizer.from_pretrained("monologg/koelectra-base-v3-discriminator")
         return model, tokenizer
 
+    elif 'roberta' == model_type:
+        config = AutoConfig.from_pretrained(
+            "klue/roberta-base",
+            num_labels=num_labels,
+            cache_dir=cache_dir
+        )
+        config.label2id = {str(i): label for i, label in enumerate(labels)}
+        config.id2label = {label: i for i, label in enumerate(labels)}
+        model = AutoModelForSequenceClassification.from_pretrained(
+            "klue/roberta-base", 
+            config=config
+        )
+        tokenizer = AutoTokenizer.from_pretrained("klue/roberta-base")
+        return model, tokenizer
+
     elif 'bigbird' == model_type:
         config = AutoConfig.from_pretrained("monologg/kobigbird-bert-base", 
                 num_labels=num_labels,
@@ -49,6 +64,5 @@ def load_model(model_type, num_labels, labels=None, cache_dir='./cache'):
         )
         tokenizer = AutoTokenizer.from_pretrained("monologg/kobigbird-bert-base")
         return model, tokenizer
-
   
     raise NotImplementedError('Unknown model')
