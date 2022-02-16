@@ -1,5 +1,6 @@
 import torch
 import argparse
+import pytorch_lightning as pl
 
 from utils import load_model, Logger
 
@@ -16,6 +17,8 @@ class LightningPLM(LightningModule):
     def __init__(self, hparams):
         super(LightningPLM, self).__init__()
         self.hparams = hparams
+        self.accuracy = pl.metrics.Accuracy()
+        self.softmax = torch.nn.Softmax(dim=-1)
 
         self.model_type = hparams.model_type.lower()
         self.model, self.tokenizer = load_model(model_type=self.model_type, num_labels=self.hparams.num_labels)
@@ -25,13 +28,9 @@ class LightningPLM(LightningModule):
     def add_model_specific_args(parent_parser):
         # add model specific args
         parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
-        parser.add_argument('--max_len',
-                            type=int,
-                            default=512,
-                            help='max sentence length on input (default: 512)')
         parser.add_argument('--batch-size',
                             type=int,
-                            default=8,
+                            default=16,
                             help='batch size for training (default: 96)')
         parser.add_argument('--lr',
                             type=float,
@@ -53,23 +52,36 @@ class LightningPLM(LightningModule):
     def training_step(self, batch, batch_idx):
         input_ids, attention_mask, label = batch
         output = self(input_ids=input_ids, attention_mask=attention_mask, labels=label)
-        # loss = self.loss_function(logits.view(-1, self.hparams.num_labels), label.view(-1))
-        
-        self.log('train_loss', output.loss, prog_bar=True)
+        probs = self.softmax(output.logits)
+        self.log_dict({
+            'train_loss' : output.loss,
+            'train_acc' : self.accuracy(probs, label)
+        }, prog_bar=True)
+
         return output.loss
 
     def validation_step(self, batch, batch_idx):
         input_ids, attention_mask, label = batch
         output = self(input_ids=input_ids, attention_mask=attention_mask, labels=label)
-        # loss = self.loss_function(logits.view(-1, self.hparams.num_labels), label.view(-1))
-        self.log('val_loss', output.loss, prog_bar=True, on_step=False, on_epoch=True)
-        return output.loss
+        acc = self.accuracy(self.softmax(output.logits), label)
+        self.log_dict({
+            'val_loss' : output.loss,
+            'val_acc' : acc
+        }, prog_bar=True, on_step=False, on_epoch=True)
+
+        return (output.loss, acc)
 
     def validation_epoch_end(self, outputs):
         avg_losses = []
-        for loss_avg in outputs:
+        avg_accuracies = []
+        for loss_avg, acc_avg in outputs:
             avg_losses.append(loss_avg)
-        self.log('avg_val_loss', torch.stack(avg_losses).mean(), prog_bar=True)
+            avg_accuracies.append(acc_avg)
+
+        self.log_dict({
+            'avg_val_loss' : torch.stack(avg_losses).mean(),
+            'avg_val_acc' : torch.stack(avg_accuracies).mean()
+        })
     
     def configure_optimizers(self):
         # Prepare optimizer
@@ -87,11 +99,11 @@ class LightningPLM(LightningModule):
         train_total = len(self.train_dataloader()) * self.hparams.max_epochs
         warmup_steps = int(train_total * self.hparams.warmup_ratio)
 
-        scheduler = get_cosine_schedule_with_warmup(
+        scheduler = get_linear_schedule_with_warmup(
             optimizer,
             num_warmup_steps=warmup_steps, 
             num_training_steps=train_total)
-        lr_scheduler = {'scheduler': scheduler, 'name': 'get_cosine_schedule_with_warmup',
+        lr_scheduler = {'scheduler': scheduler, 'name': 'get_linear_schedule_with_warmup',
                         'monitor': 'loss', 'interval': 'step',
                         'frequency': 1}
         return [optimizer], [lr_scheduler]
@@ -108,7 +120,7 @@ class LightningPLM(LightningModule):
             max_len=self.hparams.max_len)
         train_dataloader = DataLoader(
             self.train_set, batch_size=self.hparams.batch_size, num_workers=2,
-            shuffle=True, collate_fn=self._collate_fn)
+            shuffle=False, collate_fn=self._collate_fn)
         return train_dataloader
     
     def val_dataloader(self):
@@ -117,5 +129,5 @@ class LightningPLM(LightningModule):
             max_len=self.hparams.max_len)
         val_dataloader = DataLoader(
             self.valid_set, batch_size=self.hparams.batch_size, num_workers=2,
-            shuffle=True, collate_fn=self._collate_fn)
+            shuffle=False, collate_fn=self._collate_fn)
         return val_dataloader

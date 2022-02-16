@@ -6,7 +6,7 @@ from ast import literal_eval
 from torch.utils.data import Dataset
 
 class DialogueData(Dataset):
-    def __init__(self, data_path, tokenizer, max_len=512):
+    def __init__(self, data_path, tokenizer, max_len):
         self._data = pd.read_csv(data_path, sep=',')
         self.max_len = max_len
         self.tokenizer = tokenizer

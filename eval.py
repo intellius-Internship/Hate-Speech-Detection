@@ -10,7 +10,6 @@ from plm import LightningPLM
 from utils.model_util import load_model
 
 def base_setting(args):
-    args.max_len = getattr(args, 'max_len', 512)
     args.batch_size = getattr(args, 'batch_size', 4)
     args.log = getattr(args, 'log', True)
 
@@ -28,32 +27,43 @@ def tokenize(tokenizer, text, max_len):
     return token_ids, attention_mask
 
 
-def evaluation(args, **kwargs):
-    # load params
-    base_setting(args)
-    gpuid = args.gpuid[0]
-    device = "cuda:%d" % gpuid
+def eval_user_input(args, model, tokenizer, device):
 
-    print(args.model_pt)
+    def is_valid(query: str) -> bool:
+        return re.sub('[\s]*', '', query)
 
-    model, tokenizer = load_model(args.model_type, args.num_labels)
-    model = model.cuda()
+    query = input('사용자 입력: ')
+    softmax = torch.nn.Softmax(dim=-1)
 
-    if args.model_pt is not None:
-        if args.model_pt.endswith('ckpt'):
-            model = LightningPLM.load_from_checkpoint(checkpoint_path=args.model_pt, hparams=args)
-        else:
-            raise TypeError('Unknown file extension')
+    with torch.no_grad():
+        while is_valid(query):
 
-    model = model.cuda()     
-    model.eval()
+            input_ids, attention_mask = tokenize(tokenizer, text=query, max_len=args.max_len)
 
+            input_ids = torch.LongTensor(input_ids).unsqueeze(0).to(device=device)
+            attention_mask = torch.LongTensor(attention_mask).unsqueeze(0).to(device=device)
+
+            output = model(input_ids=input_ids, attention_mask=attention_mask)
+            logits = output.logits.detach().cpu()
+            probs = softmax(logits)
+            # print(probs, torch.argmax(probs, dim=-1))
+
+            pred = torch.argmax(probs, dim=-1).cpu().numpy().tolist()
+            prob = torch.max(probs).numpy().tolist()
+
+            print(f"Query: {query}")
+            print("Predict: {} ({:.2f})".format(pred[0], prob))
+
+            query = input('사용자 입력: ')
+            
+
+def eval_test_set(args, model, tokenizer, device):
     test_data = pd.read_csv(pjoin(args.data_dir, 'test.csv'))
     test_data = test_data.dropna(axis=0)
 
     pred_list = []
-
     count = 0
+
     with torch.no_grad():
         for row in test_data.iterrows():
 
@@ -76,7 +86,31 @@ def evaluation(args, **kwargs):
                 count += 1
 
         test_data['pred'] = pred_list
-        test_data.to_csv(pjoin(args.save_dir, f'{args.model_name}.csv'), index=False)
+        test_data.to_csv(pjoin(args.save_dir, f'{args.model_name}-{round(count/len(test_data), 2)*100}.csv'), index=False)
         print(f"Accuracy: {count/len(test_data)}")
             
 
+def evaluation(args, **kwargs):
+    # load params
+    base_setting(args)
+    gpuid = args.gpuid[0]
+    device = "cuda:%d" % gpuid
+
+    print(args.model_pt)
+
+    model, tokenizer = load_model(args.model_type, args.num_labels)
+    model = model.cuda()
+
+    if args.model_pt is not None:
+        if args.model_pt.endswith('ckpt'):
+            model = LightningPLM.load_from_checkpoint(checkpoint_path=args.model_pt, hparams=args)
+        else:
+            raise TypeError('Unknown file extension')
+
+    model = model.cuda()     
+    model.eval()
+
+    if args.user_input:
+        eval_user_input(args, model, tokenizer, device)
+    else:
+        eval_test_set(args, model, tokenizer, device)

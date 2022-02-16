@@ -6,6 +6,7 @@ import warnings
 
 import numpy as np
 import transformers
+import pytorch_lightning as pl
 
 from plm import LightningPLM
 from eval import evaluation
@@ -21,6 +22,15 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 SEED = 19
+
+def set_seed(seed):
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    pl.seed_everything(seed)
 
 if __name__ == "__main__":
     
@@ -38,10 +48,6 @@ if __name__ == "__main__":
                         type=str,
                         default='result')
 
-    parser.add_argument('--delimiter',
-                        type=str,
-                        default=' ')
-
     parser.add_argument('--model_name',
                         type=str,
                         default='baseline')
@@ -54,25 +60,26 @@ if __name__ == "__main__":
                         type=int,
                         default=2)
 
+    parser.add_argument('--max_len',
+                        type=int,
+                        default=128)
+
     parser.add_argument('--model_pt',
                         type=str,
                         default='baseline-last.ckpt')
-
-    parser.add_argument('--monitor',
-                        type=str,
-                        default='val_loss')
             
     parser.add_argument("--gpuid", nargs='+', type=int, default=0)
+
+    parser.add_argument('--user_input',
+                        action='store_true',
+                        default=False)
 
     parser = LightningPLM.add_model_specific_args(parser)
     parser = Trainer.add_argparse_args(parser)
     args = parser.parse_args()
     logging.info(args)
 
-    random.seed(SEED)
-    np.random.seed(SEED)
-    torch.manual_seed(SEED)
-    torch.cuda.manual_seed_all(SEED)
+    set_seed(SEED)
 
     global DATA_DIR
     DATA_DIR = args.data_dir
@@ -80,14 +87,13 @@ if __name__ == "__main__":
     if args.train:
         checkpoint_callback = ModelCheckpoint(
             dirpath='model_ckpt',
-            filename='{epoch:02d}-{avg_val_loss:.2f}',
+            filename='{epoch:02d}-{avg_val_acc:.2f}',
             verbose=True,
             save_last=True,
-            monitor='avg_val_loss',
-            mode='min',
+            monitor='avg_val_acc',
+            mode='max',
             prefix=f'{args.model_name}'
         )
-        # python main.py --train --gpuid 0 1 2 --max_epochs 5 --data_dir data --model_type bert
         model = LightningPLM(args)
         model.train()
         trainer = Trainer(
