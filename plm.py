@@ -4,7 +4,7 @@ import pytorch_lightning as pl
 
 from utils import load_model, Logger
 
-from dataloader import DialogueData
+from dataloader import PlmData
 from torch.utils.data import DataLoader
 
 from pytorch_lightning.core.lightning import LightningModule
@@ -13,6 +13,20 @@ from transformers import AdamW, get_linear_schedule_with_warmup
 
 logger = Logger('model-log', 'log/')
 
+'''
+Description
+-----------
+Hate-Speech Detection with Transformer Models
+
+Models
+------
+huggingface에 공개된 한국어 사전학습 모델 사용
+
+    BERT: monologg/kobert
+    ELECTRA: monologg/koelectra-base-v3-discriminator
+    BigBird: monologg/kobigbird-bert-base (현재 비공개 처리됨)
+    RoBERTa: klue/roberta-base     
+'''
 class LightningPLM(LightningModule):
     def __init__(self, hparams):
         super(LightningPLM, self).__init__()
@@ -116,7 +130,7 @@ class LightningPLM(LightningModule):
 
     def train_dataloader(self):
         data_path = f'{self.hparams.data_dir}/train.csv'
-        self.train_set = DialogueData(data_path, tokenizer=self.tokenizer, \
+        self.train_set = PlmData(data_path, tokenizer=self.tokenizer, \
             max_len=self.hparams.max_len)
         train_dataloader = DataLoader(
             self.train_set, batch_size=self.hparams.batch_size, num_workers=2,
@@ -125,7 +139,7 @@ class LightningPLM(LightningModule):
     
     def val_dataloader(self):
         data_path = f'{self.hparams.data_dir}/valid.csv'
-        self.valid_set = DialogueData(data_path, tokenizer=self.tokenizer, \
+        self.valid_set = PlmData(data_path, tokenizer=self.tokenizer, \
             max_len=self.hparams.max_len)
         val_dataloader = DataLoader(
             self.valid_set, batch_size=self.hparams.batch_size, num_workers=2,

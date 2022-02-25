@@ -4,113 +4,103 @@ import re
 import torch
 import pandas as pd
 
-from torch import nn
 from os.path import join as pjoin
 from plm import LightningPLM
-from utils.model_util import load_model
+from utils.data_util import encode
 
-def base_setting(args):
-    args.batch_size = getattr(args, 'batch_size', 4)
-    args.log = getattr(args, 'log', True)
+'''
+Description
+-----------
+사용자 입력이 유효한지 판단
+'''
+def is_valid(query):
+    if not re.sub('[\s]+', '', query):
+        return False
+    return True
 
-def tokenize(tokenizer, text, max_len):
-    q_toked = tokenizer.tokenize(tokenizer.cls_token + text + tokenizer.sep_token)
-    if len(q_toked) > max_len:
-        q_toked = q_toked[:max_len-1] + [q_toked[-1]]
-
-    token_ids = tokenizer.convert_tokens_to_ids(q_toked)
-    attention_mask = [1] * len(token_ids)
-    while len(token_ids) < max_len:
-        token_ids += [tokenizer.pad_token_id]
-        attention_mask += [0]
-
-    return token_ids, attention_mask
-
-
+'''
+Description
+-----------
+Transformer 기반 감정분류 모델 사용자 입력에 대한 테스트
+'''
 def eval_user_input(args, model, tokenizer, device):
-
-    def is_valid(query: str) -> bool:
-        return re.sub('[\s]*', '', query)
-
-    query = input('사용자 입력: ')
     softmax = torch.nn.Softmax(dim=-1)
 
     with torch.no_grad():
+        query = input('User Utterance: ')
         while is_valid(query):
-
-            input_ids, attention_mask = tokenize(tokenizer, text=query, max_len=args.max_len)
+            
+            # encoding user utterance
+            input_ids, attention_mask = encode(tokenizer.cls_token \
+                + query + tokenizer.sep_token, tokenizer=tokenizer, max_len=args.max_len)
 
             input_ids = torch.LongTensor(input_ids).unsqueeze(0).to(device=device)
             attention_mask = torch.LongTensor(attention_mask).unsqueeze(0).to(device=device)
 
+            # inference
             output = model(input_ids=input_ids, attention_mask=attention_mask)
             logits = output.logits.detach().cpu()
             probs = softmax(logits)
-            # print(probs, torch.argmax(probs, dim=-1))
 
             pred = torch.argmax(probs, dim=-1).cpu().numpy().tolist()
             prob = torch.max(probs).numpy().tolist()
 
-            print(f"Query: {query}")
             print("Predict: {} ({:.2f})".format(pred[0], prob))
-
-            query = input('사용자 입력: ')
+            query = input('User Utterance: ')
             
 
-def eval_test_set(args, model, tokenizer, device):
-    test_data = pd.read_csv(pjoin(args.data_dir, 'test.csv'))
-    test_data = test_data.dropna(axis=0)
-
+def eval_test_set(args, model, tokenizer, device, test_data):
     pred_list = []
     count = 0
 
     with torch.no_grad():
         for row in test_data.iterrows():
-
             utterance = row[1]['proc_text']
             label = int(row[1]['label'])
             
-            input_ids, attention_mask = tokenize(tokenizer, text=utterance, max_len=args.max_len)
+            # encoding user utterance
+            input_ids, attention_mask = encode(tokenizer.cls_token \
+                + utterance + tokenizer.sep_token, tokenizer=tokenizer, max_len=args.max_len)
 
             input_ids = torch.LongTensor(input_ids).unsqueeze(0).to(device=device)
             attention_mask = torch.LongTensor(attention_mask).unsqueeze(0).to(device=device)
 
+            # inference
             output = model(input_ids=input_ids, attention_mask=attention_mask)
             logits = output.logits.detach().cpu()
 
             predictions = torch.argmax(logits, dim=-1).detach().cpu().numpy().tolist()
-            print(predictions[0], utterance)
             pred_list.append(predictions[0]) 
 
             if predictions[0] == label:
                 count += 1
 
+        # save test result to <save_dir>
         test_data['pred'] = pred_list
         test_data.to_csv(pjoin(args.save_dir, f'{args.model_name}-{round(count/len(test_data), 2)*100}.csv'), index=False)
         print(f"Accuracy: {count/len(test_data)}")
             
 
 def evaluation(args, **kwargs):
-    # load params
-    base_setting(args)
     gpuid = args.gpuid[0]
     device = "cuda:%d" % gpuid
 
-    print(args.model_pt)
-
-    model, tokenizer = load_model(args.model_type, args.num_labels)
-    model = model.cuda()
-
+    # load model checkpoint
     if args.model_pt is not None:
         if args.model_pt.endswith('ckpt'):
             model = LightningPLM.load_from_checkpoint(checkpoint_path=args.model_pt, hparams=args)
         else:
             raise TypeError('Unknown file extension')
 
+    # freeze model params
     model = model.cuda()     
     model.eval()
 
+    # load test dataset
+    test_data = pd.read_csv(pjoin(args.data_dir, 'test.csv'))
+    test_data = test_data.dropna(axis=0)
+
     if args.user_input:
-        eval_user_input(args, model, tokenizer, device)
+        eval_user_input(args, model, model.tokenizer, device)
     else:
-        eval_test_set(args, model, tokenizer, device)
+        eval_test_set(args, model, model.tokenizer, device, test_data)

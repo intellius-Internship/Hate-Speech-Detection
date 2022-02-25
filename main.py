@@ -3,17 +3,14 @@ import torch
 import argparse
 import logging
 import warnings
-
 import numpy as np
 import transformers
 import pytorch_lightning as pl
 
 from plm import LightningPLM
 from eval import evaluation
-
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
-
 
 warnings.filterwarnings(action='ignore')
 transformers.logging.set_verbosity_error()
@@ -23,6 +20,11 @@ logger.setLevel(logging.INFO)
 
 SEED = 19
 
+'''
+Description
+-----------
+시드 고정
+'''
 def set_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -40,6 +42,11 @@ if __name__ == "__main__":
                         default=False,
                         help='for training')
 
+    parser.add_argument('--user_input',
+                        action='store_true',
+                        default=False,
+                        help='if True, test on user inputs')
+
     parser.add_argument('--data_dir',
                         type=str,
                         default='data')
@@ -50,11 +57,12 @@ if __name__ == "__main__":
 
     parser.add_argument('--model_name',
                         type=str,
-                        default='baseline')
+                        default='roberta+method')
 
     parser.add_argument('--model_type',
                         type=str,
-                        default='bert')
+                        required=True,
+                        choices=['bert', 'electra', 'bigbird', 'roberta'])
 
     parser.add_argument('--num_labels',
                         type=int,
@@ -62,28 +70,23 @@ if __name__ == "__main__":
 
     parser.add_argument('--max_len',
                         type=int,
-                        default=128)
+                        default=64)
 
     parser.add_argument('--model_pt',
                         type=str,
-                        default='baseline-last.ckpt')
+                        default=None)
             
     parser.add_argument("--gpuid", nargs='+', type=int, default=0)
-
-    parser.add_argument('--user_input',
-                        action='store_true',
-                        default=False)
 
     parser = LightningPLM.add_model_specific_args(parser)
     parser = Trainer.add_argparse_args(parser)
     args = parser.parse_args()
     logging.info(args)
 
+    # random seed 고정
     set_seed(SEED)
 
-    global DATA_DIR
-    DATA_DIR = args.data_dir
-
+    # finetuning pretrained language model
     if args.train:
         checkpoint_callback = ModelCheckpoint(
             dirpath='model_ckpt',
@@ -112,5 +115,6 @@ if __name__ == "__main__":
         logging.info('best model path {}'.format(checkpoint_callback.best_model_path))
 
     else:
+        # testing finetuned language model
         with torch.cuda.device(args.gpuid[0]):
             evaluation(args)
